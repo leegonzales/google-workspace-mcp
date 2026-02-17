@@ -24,6 +24,7 @@ import { extractDocId } from './utils/IdUtils';
 
 import { setLoggingEnabled } from './utils/logger';
 import { applyToolNameNormalization } from './utils/tool-normalization';
+import { SCOPES } from './auth/scopes';
 
 // Shared schemas for Gmail tools
 const emailComposeSchema = {
@@ -46,24 +47,16 @@ const emailComposeSchema = {
     .describe('Whether the body is HTML (default: false).'),
 };
 
-const SCOPES = [
-  'https://www.googleapis.com/auth/documents',
-  'https://www.googleapis.com/auth/drive',
-  'https://www.googleapis.com/auth/calendar',
-  'https://www.googleapis.com/auth/chat.spaces',
-  'https://www.googleapis.com/auth/chat.messages',
-  'https://www.googleapis.com/auth/chat.memberships',
-  'https://www.googleapis.com/auth/userinfo.profile',
-  'https://www.googleapis.com/auth/gmail.modify',
-  'https://www.googleapis.com/auth/directory.readonly',
-  'https://www.googleapis.com/auth/presentations.readonly',
-  'https://www.googleapis.com/auth/spreadsheets.readonly',
-];
-
 // Dynamically import version from package.json
 import { version } from '../package.json';
 
 async function main() {
+  // Handle 'login' subcommand for headless OAuth flow
+  if (process.argv.includes('login')) {
+    await import('./cli/headless-login');
+    return;
+  }
+
   // 1. Initialize services
   if (process.argv.includes('--debug')) {
     setLoggingEnabled(true);
