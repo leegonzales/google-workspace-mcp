@@ -155,6 +155,7 @@ used to maintain dot notation and avoid breaking existing configurations.
   - `src/`: Contains the source code for the server.
     - `__tests__/`: Contains all the tests.
     - `auth/`: Handles authentication.
+    - `cli/`: CLI tools (e.g., headless OAuth login).
     - `services/`: Contains the business logic for each service.
     - `utils/`: Contains utility functions.
   - `config/`: Contains configuration files.
@@ -176,7 +177,32 @@ node scripts/auth-utils.js <command>
 
 ### Commands
 
+- `login`: Authenticate via headless OAuth flow (for SSH/WSL/Cloud Shell). Reads
+  credentials securely from `/dev/tty` so they are not visible to AI models.
 - `clear`: Clear all authentication credentials.
 - `expire`: Force the access token to expire (for testing refresh).
 - `status`: Show current authentication status.
 - `help`: Show the help message.
+
+### Headless / Remote Environments
+
+If you are running the server in an environment without a browser (SSH, WSL,
+Cloud Shell, VMs), authentication requires manual steps:
+
+1. Run the login tool:
+   ```bash
+   node scripts/auth-utils.js login
+   ```
+   Or, from the `workspace-server` directory:
+   ```bash
+   node dist/headless-login.js
+   ```
+2. Open the printed OAuth URL in any browser (your local machine, phone, etc.).
+3. Complete Google sign-in. The browser will display a credentials JSON block.
+4. Copy the JSON and paste it into the CLI when prompted.
+
+The CLI reads input from `/dev/tty` (Unix) or `CON` (Windows) rather than
+process stdin, so credentials are never exposed to an AI model that may have
+spawned the process.
+
+Use `--force` to re-authenticate if credentials already exist.

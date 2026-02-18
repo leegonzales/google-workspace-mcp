@@ -93,6 +93,12 @@ The extension provides the following tools:
   assistant). Defaults to the authenticated user and supports filtering by
   relation type.
 
+### Authentication
+
+- `auth.clear`: Clears authentication credentials, forcing a re-login on the
+  next request.
+- `auth.refreshToken`: Manually triggers the token refresh process.
+
 ## Custom Commands
 
 The extension includes several pre-configured commands for common tasks:
