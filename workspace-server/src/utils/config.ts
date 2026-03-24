@@ -9,6 +9,7 @@ import { logToFile } from './logger';
 export interface WorkspaceConfig {
   clientId: string;
   cloudFunctionUrl: string;
+  profile: string;
 }
 
 const DEFAULT_CONFIG: WorkspaceConfig = {
@@ -22,11 +23,13 @@ const DEFAULT_CONFIG: WorkspaceConfig = {
  * to read from environment variables or a configuration file.
  */
 export function loadConfig(): WorkspaceConfig {
+  const profile = process.env['WORKSPACE_PROFILE'] || '';
   const config: WorkspaceConfig = {
     clientId: process.env['WORKSPACE_CLIENT_ID'] || DEFAULT_CONFIG.clientId,
     cloudFunctionUrl:
       process.env['WORKSPACE_CLOUD_FUNCTION_URL'] ||
       DEFAULT_CONFIG.cloudFunctionUrl,
+    profile,
   };
 
   const maskedClientId =
@@ -34,7 +37,7 @@ export function loadConfig(): WorkspaceConfig {
       ? `...${config.clientId.slice(-2)}`
       : config.clientId;
   logToFile(
-    `Loaded config: clientId=${maskedClientId}, cloudFunctionUrl=${config.cloudFunctionUrl}`,
+    `Loaded config: clientId=${maskedClientId}, cloudFunctionUrl=${config.cloudFunctionUrl}, profile=${config.profile || '(default)'}`,
   );
   return config;
 }
