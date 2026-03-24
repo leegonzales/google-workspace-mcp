@@ -7,13 +7,21 @@
 import { type Credentials } from 'google-auth-library';
 import { HybridTokenStorage } from './hybrid-token-storage';
 import type { OAuthCredentials } from './types';
+import { loadConfig } from '../../utils/config';
 
-const KEYCHAIN_SERVICE_NAME = 'gemini-cli-workspace-oauth';
+const BASE_KEYCHAIN_SERVICE_NAME = 'gemini-cli-workspace-oauth';
 const MAIN_ACCOUNT_KEY = 'main-account';
+
+function getKeychainServiceName(): string {
+  const { profile } = loadConfig();
+  return profile
+    ? `${BASE_KEYCHAIN_SERVICE_NAME}-${profile}`
+    : BASE_KEYCHAIN_SERVICE_NAME;
+}
 
 export class OAuthCredentialStorage {
   private static storage: HybridTokenStorage = new HybridTokenStorage(
-    KEYCHAIN_SERVICE_NAME,
+    getKeychainServiceName(),
   );
 
   /**
