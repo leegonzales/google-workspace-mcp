@@ -1042,7 +1042,15 @@ There are a list of system labels that can be modified on a message:
     'gmail.send',
     {
       description: 'Send an email message.',
-      inputSchema: emailComposeSchema,
+      inputSchema: {
+        ...emailComposeSchema,
+        threadId: z
+          .string()
+          .optional()
+          .describe(
+            'The thread ID to send the message as a reply to. When provided, the message will be linked to the existing thread with appropriate reply headers.',
+          ),
+      },
     },
     gmailService.send,
   );
