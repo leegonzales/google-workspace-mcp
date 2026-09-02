@@ -6,6 +6,7 @@
 
 import { AuthManager } from '../../auth/AuthManager';
 import { OAuthCredentialStorage } from '../../auth/token-storage/oauth-credential-storage';
+import { shouldLaunchBrowser } from '../../utils/secure-browser-launcher';
 import { google } from 'googleapis';
 
 // Mock dependencies
@@ -259,5 +260,90 @@ describe('AuthManager', () => {
         body: expect.stringContaining('valid_refresh'),
       }),
     );
+  });
+
+  describe('headless/unattended refresh-failure handling', () => {
+    beforeEach(() => {
+      // Simulate a daemon-spawned, no-browser session for these tests.
+      (shouldLaunchBrowser as jest.Mock).mockReturnValue(false);
+    });
+
+    it('does NOT clear stored credentials on a transient refresh failure (network error)', async () => {
+      const expiredTime = Date.now() - 1000;
+      (OAuthCredentialStorage.loadCredentials as jest.Mock).mockResolvedValue({
+        access_token: 'expired_token',
+        refresh_token: 'still_good_refresh',
+        expiry_date: expiredTime,
+        scope: 'scope1',
+      });
+
+      // Cloud function unreachable (offline, DNS failure, cold start, etc.)
+      (global.fetch as jest.Mock).mockRejectedValue(
+        new Error('fetch failed: ECONNREFUSED'),
+      );
+
+      await expect(authManager.getAuthenticatedClient()).rejects.toThrow(
+        /No cached Google Workspace credentials/,
+      );
+
+      expect(OAuthCredentialStorage.clearCredentials).not.toHaveBeenCalled();
+    });
+
+    it('does NOT clear stored credentials when the cloud function returns a 5xx', async () => {
+      const expiredTime = Date.now() - 1000;
+      (OAuthCredentialStorage.loadCredentials as jest.Mock).mockResolvedValue({
+        access_token: 'expired_token',
+        refresh_token: 'still_good_refresh',
+        expiry_date: expiredTime,
+        scope: 'scope1',
+      });
+
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: false,
+        status: 503,
+        text: async () => 'Service Unavailable',
+      });
+
+      await expect(authManager.getAuthenticatedClient()).rejects.toThrow(
+        /No cached Google Workspace credentials/,
+      );
+
+      expect(OAuthCredentialStorage.clearCredentials).not.toHaveBeenCalled();
+    });
+
+    it('DOES clear stored credentials when the refresh_token is permanently invalid (401)', async () => {
+      const expiredTime = Date.now() - 1000;
+      (OAuthCredentialStorage.loadCredentials as jest.Mock).mockResolvedValue({
+        access_token: 'expired_token',
+        refresh_token: 'revoked_refresh',
+        expiry_date: expiredTime,
+        scope: 'scope1',
+      });
+
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: false,
+        status: 401,
+        text: async () => 'invalid_grant',
+      });
+
+      await expect(authManager.getAuthenticatedClient()).rejects.toThrow(
+        /No cached Google Workspace credentials/,
+      );
+
+      expect(OAuthCredentialStorage.clearCredentials).toHaveBeenCalled();
+    });
+
+    it('fails fast instead of opening a browser when no credentials exist and no browser is available', async () => {
+      (OAuthCredentialStorage.loadCredentials as jest.Mock).mockResolvedValue(
+        null,
+      );
+
+      await expect(authManager.getAuthenticatedClient()).rejects.toThrow(
+        /No cached Google Workspace credentials/,
+      );
+
+      // The whole point: never attempts the interactive web-login flow.
+      expect(mockOAuth2Client.generateAuthUrl).not.toHaveBeenCalled();
+    });
   });
 });

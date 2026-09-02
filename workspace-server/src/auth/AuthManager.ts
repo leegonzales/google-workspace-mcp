@@ -21,6 +21,23 @@ const CLOUD_FUNCTION_URL = config.cloudFunctionUrl;
 const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
+ * Thrown by refreshToken() when a refresh attempt fails. `permanent` tells the
+ * caller whether the stored refresh_token is actually invalid (safe to clear
+ * and force re-auth) versus a transient failure (network blip, cloud
+ * function 5xx/timeout) where the credentials are still good and should be
+ * left in storage for the next attempt to retry.
+ */
+export class TokenRefreshError extends Error {
+  constructor(
+    message: string,
+    public readonly permanent: boolean,
+  ) {
+    super(message);
+    this.name = 'TokenRefreshError';
+  }
+}
+
+/**
  * An Authentication URL for updating the credentials of a Oauth2Client
  * as well as a promise that will resolve when the credentials have
  * been refreshed (or which throws error when refreshing credentials failed).
@@ -108,9 +125,14 @@ export class AuthManager {
           logToFile('Token refreshed successfully');
         } catch (error) {
           logToFile(`Failed to refresh token: ${error}`);
-          // Clear the client and fall through to re-authenticate
           this.client = null;
-          await OAuthCredentialStorage.clearCredentials();
+          // Only wipe stored credentials when the refresh_token itself is
+          // confirmed bad. A transient failure here would otherwise force
+          // every subsequent call (including unattended/headless ones) into
+          // the interactive browser flow below with nothing to recover.
+          if (!(error instanceof TokenRefreshError) || error.permanent) {
+            await OAuthCredentialStorage.clearCredentials();
+          }
         }
       }
 
@@ -162,9 +184,12 @@ export class AuthManager {
           logToFile('Token refreshed successfully after loading from storage');
         } catch (error) {
           logToFile(`Failed to refresh loaded token: ${error}`);
-          // Clear the client and fall through to re-authenticate
           this.client = null;
-          await OAuthCredentialStorage.clearCredentials();
+          // See comment above: only clear on a confirmed-bad refresh_token,
+          // not on a transient refresh failure.
+          if (!(error instanceof TokenRefreshError) || error.permanent) {
+            await OAuthCredentialStorage.clearCredentials();
+          }
         }
       }
 
@@ -172,6 +197,20 @@ export class AuthManager {
       if (this.client) {
         return this.client;
       }
+    }
+
+    // Fail fast in headless/unattended environments (e.g. a daemon-spawned
+    // session with no user present) instead of opening a browser no one can
+    // reach and hanging for the full 5-minute timeout below. This is the
+    // common case once credentials are missing/cleared during an automated
+    // wake — every such call was previously guaranteed to time out
+    // identically rather than surfacing a fast, actionable error.
+    if (!shouldLaunchBrowser()) {
+      throw new Error(
+        'No cached Google Workspace credentials and no interactive browser ' +
+          'available to complete OAuth (headless/unattended session). ' +
+          'Complete authentication from an interactive session, then retry.',
+      );
     }
 
     const webLogin = await this.authWithWeb(oAuth2Client);
@@ -218,27 +257,45 @@ export class AuthManager {
       const currentCredentials = { ...this.client.credentials };
 
       if (!currentCredentials.refresh_token) {
-        throw new Error('No refresh token available');
+        throw new TokenRefreshError('No refresh token available', true);
       }
 
       logToFile('Calling cloud function to refresh token...');
 
       // Call the cloud function refresh endpoint
       // The cloud function has the client secret needed for token refresh
-      const response = await fetch(`${CLOUD_FUNCTION_URL}/refreshToken`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          refresh_token: currentCredentials.refresh_token,
-        }),
-      });
+      let response: Response;
+      try {
+        response = await fetch(`${CLOUD_FUNCTION_URL}/refreshToken`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            refresh_token: currentCredentials.refresh_token,
+          }),
+        });
+      } catch (networkError) {
+        // Could not reach the cloud function at all (offline, DNS, cold
+        // start, etc). The refresh_token itself is unknown-good — do not
+        // treat this as a reason to wipe it.
+        throw new TokenRefreshError(
+          `Token refresh request failed: ${networkError}`,
+          false,
+        );
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
+        // Google returns 400/401 with an invalid_grant-style body when the
+        // refresh_token itself has been revoked or expired — that's the only
+        // case where the stored credentials are actually bad. Anything else
+        // (5xx, rate limiting, a cloud function cold-start hiccup) is
+        // transient and the refresh_token is still presumed good.
+        const permanent = response.status === 400 || response.status === 401;
+        throw new TokenRefreshError(
           `Token refresh failed: ${response.status} ${errorText}`,
+          permanent,
         );
       }
 
