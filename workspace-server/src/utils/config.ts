@@ -16,6 +16,7 @@ const DEFAULT_CONFIG: WorkspaceConfig = {
   clientId:
     '338689075775-o75k922vn5fdl18qergr96rp8g63e4d7.apps.googleusercontent.com',
   cloudFunctionUrl: 'https://google-workspace-extension.geminicli.com',
+  profile: '',
 };
 
 /**
